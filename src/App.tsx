@@ -1,126 +1,153 @@
+import { useMemo, useState } from "react";
 import "./styles.css";
-
-const project = {
-  "sourceNo": 6,
-  "id": "hxyfront-62004",
-  "port": 62004,
-  "title": "滑雪板调校维护",
-  "domain": "滑雪装备调校",
-  "prompt": "我想做一个面向滑雪板调校店的装备维护前端系统，技师可以记录雪板品牌、长度、板型、刃角、打蜡类型、底板损伤、修补位置和客户偏好。页面需要有维护工单列表、刃角参数表、底板损伤标记区、完工状态筛选和客户历史维护记录。",
-  "palette": [
-    "#0369a1",
-    "#14b8a6",
-    "#f97316"
-  ],
-  "metrics": [
-    "待维护",
-    "完工工单",
-    "平均刃角",
-    "底板修补"
-  ],
-  "filters": [
-    "全地域",
-    "公园板",
-    "竞速板",
-    "粉雪板"
-  ],
-  "fields": [
-    "雪板品牌",
-    "长度",
-    "板型",
-    "刃角",
-    "打蜡类型",
-    "底板损伤"
-  ],
-  "records": [
-    [
-      "ORD-106",
-      "Burton 156",
-      "侧刃88°，底刃1°",
-      "已打低温蜡"
-    ],
-    [
-      "ORD-112",
-      "竞速板165",
-      "底板划痕12cm",
-      "待补P-Tex"
-    ],
-    [
-      "ORD-118",
-      "粉雪板158",
-      "客户偏好弱咬雪",
-      "待交付"
-    ]
-  ]
-};
+import type { BoardShape, StageFilter, WorkOrder } from "./types";
+import { STAGE_LABELS } from "./types";
+import {
+  edgeAngleStats,
+  filterOrders,
+  isDamageRecorded,
+} from "./domain/orders";
+import { useWorkOrders } from "./data/useWorkOrders";
+import { OrderForm } from "./components/OrderForm";
+import { OrderList } from "./components/OrderList";
+import { OrderDetail } from "./components/OrderDetail";
+import { CustomerHistory } from "./components/CustomerHistory";
 
 function App() {
+  const store = useWorkOrders();
+
+  // 筛选状态放在 App 层：拒绝新工单、打开/关闭详情都不会改动列表与筛选
+  const [stageFilter, setStageFilter] = useState<StageFilter>("all");
+  const [shapeFilter, setShapeFilter] = useState<BoardShape | "all">("all");
+  const [keyword, setKeyword] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const visibleOrders = useMemo(
+    () =>
+      filterOrders(store.orders, {
+        stage: stageFilter,
+        shape: shapeFilter,
+        keyword,
+      }),
+    [store.orders, stageFilter, shapeFilter, keyword],
+  );
+
+  // 详情里的工单始终来自最新数据，刃角/标记/状态改动会实时同步
+  const selected = selectedId
+    ? store.orders.find((order) => order.id === selectedId) ?? null
+    : null;
+
+  const stats = useMemo(() => {
+    const pending = store.orders.filter((order) => order.stage === "pending_review").length;
+    const completed = store.orders.filter(
+      (order) => order.stage === "completed" || order.stage === "delivered",
+    ).length;
+    const angles = edgeAngleStats(store.orders);
+    const damageCount = store.orders.reduce(
+      (acc, order) => acc + order.damageMarks.length,
+      0,
+    );
+    return { pending, completed, angles, damageCount };
+  }, [store.orders]);
+
+  function openOrder(order: WorkOrder) {
+    setSelectedId(order.id);
+  }
+
   return (
     <main className="app">
       <section className="hero">
-        <p>{project.id} · 源提示词{project.sourceNo} · Port {project.port}</p>
-        <h1>{project.title}</h1>
-        <span>{project.prompt}</span>
+        <p>SKI TUNING WORKBENCH · 雪板调校工单台</p>
+        <h1>雪板调校工单台</h1>
+        <span>
+          每张工单记录品牌、长度、板型与客户偏好。底板标记修补位置后才能登记刃角复核；
+          复核通过后改动刃角或客户偏好，原复核失效并回到待复核。
+          同一客户已有未交付雪板时新工单拒绝登记。数据仅保存在本浏览器，刷新后保留。
+        </span>
       </section>
 
       <section className="metrics">
-        {project.metrics.map((metric: string, index: number) => (
-          <article key={metric}>
-            <small>{metric}</small>
-            <strong>{[86, 14, 7, 32][index] ?? 12}</strong>
-          </article>
-        ))}
+        <article>
+          <small>待复核工单</small>
+          <strong>{stats.pending}</strong>
+        </article>
+        <article>
+          <small>完工工单（含已交付）</small>
+          <strong>{stats.completed}</strong>
+        </article>
+        <article>
+          <small>平均刃角（底刃/侧刃）</small>
+          <strong>
+            {store.orders.length === 0
+              ? "—"
+              : `${stats.angles.avgBase}° / ${stats.angles.avgSide}°`}
+          </strong>
+        </article>
+        <article>
+          <small>底板修补标记</small>
+          <strong>{stats.damageCount}</strong>
+        </article>
       </section>
 
       <section className="workspace">
-        <aside className="panel">
-          <h2>{project.domain}筛选</h2>
-          <div className="chips">
-            {project.filters.map((item: string) => (
-              <button key={item}>{item}</button>
-            ))}
-          </div>
+        <aside className="side-col">
+          <section className="panel rules-panel">
+            <h2>状态流转规则</h2>
+            <ol className="rules">
+              <li>
+                <span className="stage-badge pending_review">{STAGE_LABELS.pending_review}</span>
+                新建工单起始状态；须先登记底板损伤
+              </li>
+              <li>
+                <span className="stage-badge reviewed">{STAGE_LABELS.reviewed}</span>
+                底板已标记 + 刃角复核通过
+              </li>
+              <li>
+                <span className="stage-badge completed">{STAGE_LABELS.completed}</span>
+                复核通过后才可完工
+              </li>
+              <li>
+                <span className="stage-badge delivered">{STAGE_LABELS.delivered}</span>
+                完工后交付，释放客户在厂雪板名额
+              </li>
+            </ol>
+            <p className="rule-note">
+              复核通过后改动刃角或客户偏好 → 复核立即失效，回到
+              <span className="stage-badge pending_review">{STAGE_LABELS.pending_review}</span>
+              。当前已登记底板的工单：
+              {store.orders.filter(isDamageRecorded).length} / {store.orders.length}
+            </p>
+          </section>
+          <CustomerHistory orders={store.orders} onOpen={openOrder} />
         </aside>
 
-        <section className="panel form-panel">
-          <div className="heading">
-            <div>
-              <p>专业字段</p>
-              <h2>新增记录</h2>
-            </div>
-            <button className="primary">保存草稿</button>
-          </div>
-          <div className="field-grid">
-            {project.fields.map((field: string) => (
-              <label key={field}>
-                <span>{field}</span>
-                <input placeholder={"填写" + field} />
-              </label>
-            ))}
-          </div>
-        </section>
+        <div className="main-col">
+          <OrderForm orders={store.orders} onCreate={store.create} />
+          <OrderList
+            orders={visibleOrders}
+            stage={stageFilter}
+            shape={shapeFilter}
+            keyword={keyword}
+            onStageChange={setStageFilter}
+            onShapeChange={setShapeFilter}
+            onKeywordChange={setKeyword}
+            onOpen={openOrder}
+          />
+        </div>
       </section>
 
-      <section className="panel">
-        <div className="heading">
-          <div>
-            <p>历史记录</p>
-            <h2>近期工作台</h2>
-          </div>
-          <button>导出摘要</button>
-        </div>
-        <div className="records">
-          {project.records.map((record: string[], index: number) => (
-            <article key={record.join("-")}>
-              <b>{String(index + 1).padStart(2, "0")}</b>
-              <div>
-                <h3>{record[0]}</h3>
-                <p>{record.slice(1).join(" · ")}</p>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
+      {selected && (
+        <OrderDetail
+          order={selected}
+          onClose={() => setSelectedId(null)}
+          onReview={store.review}
+          onUpdate={store.update}
+          onAddMark={store.markDamage}
+          onRemoveMark={store.deleteDamageMark}
+          onComplete={store.complete}
+          onDeliver={store.deliver}
+        />
+      )}
     </main>
   );
 }
