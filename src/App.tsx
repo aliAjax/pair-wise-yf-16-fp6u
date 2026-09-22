@@ -1,128 +1,102 @@
+import { useMemo, useState } from "react";
+import { WorkbenchProvider, useWorkbench } from "./store";
+import { matchesStatus, type StatusFilter } from "./rules";
+import type { BoardType } from "./types";
+import { MetricsBar } from "./components/MetricsBar";
+import { Filters } from "./components/Filters";
+import { OrderForm } from "./components/OrderForm";
+import { OrderList } from "./components/OrderList";
+import { OrderDetail } from "./components/OrderDetail";
+import { CustomerHistory } from "./components/CustomerHistory";
 import "./styles.css";
 
-const project = {
-  "sourceNo": 6,
-  "id": "hxyfront-62004",
-  "port": 62004,
-  "title": "滑雪板调校维护",
-  "domain": "滑雪装备调校",
-  "prompt": "我想做一个面向滑雪板调校店的装备维护前端系统，技师可以记录雪板品牌、长度、板型、刃角、打蜡类型、底板损伤、修补位置和客户偏好。页面需要有维护工单列表、刃角参数表、底板损伤标记区、完工状态筛选和客户历史维护记录。",
-  "palette": [
-    "#0369a1",
-    "#14b8a6",
-    "#f97316"
-  ],
-  "metrics": [
-    "待维护",
-    "完工工单",
-    "平均刃角",
-    "底板修补"
-  ],
-  "filters": [
-    "全地域",
-    "公园板",
-    "竞速板",
-    "粉雪板"
-  ],
-  "fields": [
-    "雪板品牌",
-    "长度",
-    "板型",
-    "刃角",
-    "打蜡类型",
-    "底板损伤"
-  ],
-  "records": [
-    [
-      "ORD-106",
-      "Burton 156",
-      "侧刃88°，底刃1°",
-      "已打低温蜡"
-    ],
-    [
-      "ORD-112",
-      "竞速板165",
-      "底板划痕12cm",
-      "待补P-Tex"
-    ],
-    [
-      "ORD-118",
-      "粉雪板158",
-      "客户偏好弱咬雪",
-      "待交付"
-    ]
-  ]
-};
+function Workbench() {
+  const { orders } = useWorkbench();
+  const [status, setStatus] = useState<StatusFilter>("active");
+  const [boardType, setBoardType] = useState<BoardType | "全部">("全部");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-function App() {
+  const visibleOrders = useMemo(
+    () =>
+      orders.filter(
+        (o) =>
+          matchesStatus(o, status) &&
+          (boardType === "全部" || o.boardType === boardType)
+      ),
+    [orders, status, boardType]
+  );
+
+  // 列表和筛选保持原样：筛选变化不重置选中；当前选中不在筛选内时仅隐藏详情
+  const selectedVisible =
+    selectedId !== null && visibleOrders.some((o) => o.id === selectedId);
+
+  const handleCreated = (id: string) => {
+    setStatus("active");
+    setBoardType("全部");
+    setSelectedId(id);
+  };
+
   return (
     <main className="app">
       <section className="hero">
-        <p>{project.id} · 源提示词{project.sourceNo} · Port {project.port}</p>
-        <h1>{project.title}</h1>
-        <span>{project.prompt}</span>
+        <p>hxyfront-62004 · 滑雪装备调校 · Port 62004</p>
+        <h1>雪板调校工单台</h1>
+        <span>
+          每张工单记录品牌、长度、板型与客户偏好；底板损伤标记修补位置后才能登记刃角复核，
+          复核通过后改动刃角或客户偏好将自动失效回到待复核。同一客户未交付雪板期间拒绝新单。
+          数据只保存在本浏览器，刷新后保留。
+        </span>
       </section>
 
-      <section className="metrics">
-        {project.metrics.map((metric: string, index: number) => (
-          <article key={metric}>
-            <small>{metric}</small>
-            <strong>{[86, 14, 7, 32][index] ?? 12}</strong>
-          </article>
-        ))}
-      </section>
+      <MetricsBar orders={orders} />
 
       <section className="workspace">
-        <aside className="panel">
-          <h2>{project.domain}筛选</h2>
-          <div className="chips">
-            {project.filters.map((item: string) => (
-              <button key={item}>{item}</button>
-            ))}
-          </div>
-        </aside>
-
-        <section className="panel form-panel">
-          <div className="heading">
-            <div>
-              <p>专业字段</p>
-              <h2>新增记录</h2>
-            </div>
-            <button className="primary">保存草稿</button>
-          </div>
-          <div className="field-grid">
-            {project.fields.map((field: string) => (
-              <label key={field}>
-                <span>{field}</span>
-                <input placeholder={"填写" + field} />
-              </label>
-            ))}
-          </div>
-        </section>
+        <Filters
+          status={status}
+          boardType={boardType}
+          onStatus={setStatus}
+          onBoardType={setBoardType}
+        />
+        <OrderForm onCreated={handleCreated} />
       </section>
 
-      <section className="panel">
-        <div className="heading">
-          <div>
-            <p>历史记录</p>
-            <h2>近期工作台</h2>
-          </div>
-          <button>导出摘要</button>
-        </div>
-        <div className="records">
-          {project.records.map((record: string[], index: number) => (
-            <article key={record.join("-")}>
-              <b>{String(index + 1).padStart(2, "0")}</b>
-              <div>
-                <h3>{record[0]}</h3>
-                <p>{record.slice(1).join(" · ")}</p>
-              </div>
-            </article>
-          ))}
+      <section className="board-grid">
+        <OrderList
+          orders={visibleOrders}
+          status={status}
+          boardType={boardType}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+        />
+        <div className="side-stack">
+          {selectedVisible && selectedId ? (
+            <OrderDetail orderId={selectedId} />
+          ) : (
+            <section className="panel detail-panel detail-placeholder">
+              <p className="section-kicker">工单详情</p>
+              <p className="muted">从左侧列表选择一张工单，维护刃角参数、底板损伤标记与复核。</p>
+            </section>
+          )}
+          <CustomerHistory
+            orders={orders}
+            selectedId={selectedId}
+            onSelect={(id) => {
+              const o = orders.find((x) => x.id === id);
+              if (!o) return;
+              setSelectedId(id);
+              setStatus(o.delivered ? "delivered" : o.review ? "passed" : "pending");
+            }}
+          />
         </div>
       </section>
     </main>
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <WorkbenchProvider>
+      <Workbench />
+    </WorkbenchProvider>
+  );
+}
